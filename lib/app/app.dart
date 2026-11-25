@@ -1,73 +1,54 @@
-import 'package:defyx_vpn/app/advertise_director.dart';
 import 'package:defyx_vpn/app/router/app_router.dart';
 import 'package:defyx_vpn/core/data/local/remote/api/flowline_service.dart';
+import 'package:defyx_vpn/modules/core/vpn.dart';
+import 'package:defyx_vpn/modules/core/vpn_bridge.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'package:defyx_vpn/modules/core/vpn.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:defyx_vpn/modules/core/vpn_bridge.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
-class App extends ConsumerWidget {
+class App extends ConsumerStatefulWidget {
   const App({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return FutureBuilder<bool>(
-      future: _initializeApp(ref),
-      builder: (context, snapshot) {
-        _handleAdConfiguration(snapshot);
-        return _buildApp(context, ref);
-      },
-    );
-  }
+  ConsumerState<App> createState() => _AppState();
+}
 
-  Future<bool> _initializeApp(WidgetRef ref) async {
+class _AppState extends ConsumerState<App> {
+  late final Future<void> _initialization = _initializeServices();
+
+  Future<void> _initializeServices() async {
     await dotenv.load();
-    await _initializeServices(ref);
-    return await AdvertiseDirector.shouldUseInternalAds(ref);
-  }
 
-  Future<void> _initializeServices(WidgetRef ref) async {
     try {
       final vpnBridge = VpnBridge();
       await vpnBridge.getVpnStatus();
-      if (!ref.context.mounted) return;
-      final vpn = VPN(ProviderScope.containerOf(ref.context));
+      if (!mounted) return;
+
+      final container = ProviderScope.containerOf(context);
+      final vpn = VPN(container);
       await vpn.getVPNStatus();
       await vpnBridge.setAsnName();
       await ref.read(flowlineServiceProvider).saveFlowline();
-    } on PlatformException catch (e, stack) {
-      debugPrint('PlatformException: ${e.message}, details: ${e.details}');
+    } on PlatformException catch (error, stack) {
+      debugPrint('PlatformException: ${error.message}, details: ${error.details}');
       debugPrintStack(stackTrace: stack);
-    } catch (e, stack) {
-      debugPrint('Unexpected error saving flowline: $e');
+    } catch (error, stack) {
+      debugPrint('Unexpected VPN initialization error: $error');
       debugPrintStack(stackTrace: stack);
     }
   }
 
-  void _handleAdConfiguration(AsyncSnapshot<bool> snapshot) {
-    if (!snapshot.hasData) return;
-
-    final shouldUseInternalAds = snapshot.data!;
-    if (shouldUseInternalAds) {
-      debugPrint('Using internal ads');
-    } else {
-      _initializeMobileAds();
-    }
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _initialization,
+      builder: (context, snapshot) => _buildApp(context),
+    );
   }
 
-  Future<void> _initializeMobileAds() async {
-    try {
-      await MobileAds.instance.initialize();
-    } catch (error) {
-      debugPrint('Error initializing Google AdMob: $error');
-    }
-  }
-
-  Widget _buildApp(BuildContext context, WidgetRef ref) {
+  Widget _buildApp(BuildContext context) {
     final router = ref.watch(routerProvider);
     final designSize = _getDesignSize(context);
 
