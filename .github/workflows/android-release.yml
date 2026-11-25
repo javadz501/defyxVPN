@@ -1,0 +1,158 @@
+name: Android Release
+
+on:
+  push:
+    branches:
+      - defyxVPN
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: defyxvpn-android-release
+  cancel-in-progress: true
+
+jobs:
+  android-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          architecture: x64
+          cache: true
+
+      - name: Install Android NDK
+        run: |
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.0.12077973"
+
+      - name: Validate required repository secrets
+        env:
+          DXCORE_PRIVATE_ACCESS_TOKEN: ${{ secrets.DXCORE_PRIVATE_ACCESS_TOKEN }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
+        run: |
+          required=(DXCORE_PRIVATE_ACCESS_TOKEN KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD)
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required repository secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Download proprietary DXcore Android framework
+        env:
+          DXCORE_PRIVATE_ACCESS_TOKEN: ${{ secrets.DXCORE_PRIVATE_ACCESS_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $DXCORE_PRIVATE_ACCESS_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/UnboundTechCo/DXcore-private/releases/latest)"
+          asset_id="$(jq -r '.assets[]? | select(.name == "DXcore-android.zip") | .id' <<< "$release_json" | head -n1)"
+          if [[ -z "$asset_id" || "$asset_id" == "null" ]]; then
+            echo "::error::DXcore-android.zip was not found in the private DXcore release."
+            exit 1
+          fi
+
+          curl --fail --location --silent --show-error \
+            -H "Authorization: Bearer $DXCORE_PRIVATE_ACCESS_TOKEN" \
+            -H "Accept: application/octet-stream" \
+            "https://api.github.com/repos/UnboundTechCo/DXcore-private/releases/assets/$asset_id" \
+            --output /tmp/DXcore-android.zip
+          mkdir -p /tmp/dxcore-unpacked android/app/libs
+          unzip -q /tmp/DXcore-android.zip -d /tmp/dxcore-unpacked
+          aar_path="$(find /tmp/dxcore-unpacked -type f -name 'DXcore.aar' -print -quit)"
+          if [[ -z "$aar_path" ]]; then
+            echo "::error::DXcore.aar was not present in the downloaded framework archive."
+            exit 1
+          fi
+          install -m 0644 "$aar_path" android/app/libs/DXcore.aar
+
+      - name: Prepare environment and signing configuration
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .env.exmaple .env
+          printf '%s\n' \
+            "storePassword=$KEYSTORE_PASSWORD" \
+            "keyPassword=$KEY_PASSWORD" \
+            "keyAlias=$KEY_ALIAS" \
+            "storeFile=keystore.jks" > android/key.properties
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/keystore.jks
+          chmod 600 android/key.properties android/app/keystore.jks
+
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+
+      - name: Build universal APK
+        run: flutter build apk --release
+
+      - name: Build ABI-specific APKs
+        run: flutter build apk --release --split-per-abi
+
+      - name: Verify and prepare signed APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          output="build/app/outputs/flutter-apk"
+          cp "$output/app-release.apk" release-assets/DefyxVPN-fork-universal.apk
+          cp "$output/app-arm64-v8a-release.apk" release-assets/DefyxVPN-fork-arm64-v8a.apk
+          cp "$output/app-armeabi-v7a-release.apk" release-assets/DefyxVPN-fork-armeabi-v7a.apk
+
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          if [[ -z "$apksigner" ]]; then
+            echo "::error::Android apksigner was not found."
+            exit 1
+          fi
+          for apk in release-assets/*.apk; do
+            "$apksigner" verify --verbose --print-certs "$apk"
+          done
+
+      - name: Publish APKs directly to GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version: *//p' pubspec.yaml | tr -d '"' | head -n1)"
+          tag="v${version/+/-}-fork"
+          title="DefyxVPN Fork ${version}"
+          notes="Ad-free fork build. VPN core and connection protocols are retained."
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" release-assets/*.apk --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" release-assets/*.apk \
+              --title "$title" \
+              --notes "$notes" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+
+      - name: Clean signing material
+        if: always()
+        run: |
+          rm -f android/key.properties android/app/keystore.jks .env
