@@ -16,14 +16,6 @@ class ScrollManager {
     });
   }
 
-  void handleAdsStateChange(bool showCountdown) {
-    Future.delayed(const Duration(milliseconds: 300), () {
-      if (!showCountdown) {
-        scrollToTopWithRetry();
-      }
-    });
-  }
-
   void scrollToBottomWithRetry({int attempts = 3}) {
     if (attempts <= 0) return;
     if (scrollController.hasClients) {
