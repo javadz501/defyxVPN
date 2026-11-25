@@ -29,7 +29,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "de.unboundtech.defyxvpn"
+        applicationId = "de.unboundtech.defyxvpn.fork"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -76,7 +76,6 @@ repositories {
 }
 
 dependencies {
-    implementation("com.google.android.ump:user-messaging-platform:3.1.0")
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
     implementation(files("libs/DXcore.aar"))
     implementation("androidx.activity:activity-ktx:1.7.2")
