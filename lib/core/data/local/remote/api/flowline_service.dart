@@ -35,11 +35,6 @@ class FlowlineService implements IFlowlineService {
       final appBuildType = GlobalVars.appBuildType;
       final version = decoded['version'][appBuildType];
 
-      final advertiseStorageMap = {
-        'api_advertise': decoded['advertise'],
-      };
-      await _secureStorage.writeMap(apiAvertiseKey, advertiseStorageMap);
-
       final versionStorageMap = {
         'api_app_version': version,
         'forceUpdate': decoded['forceUpdate'][version],
