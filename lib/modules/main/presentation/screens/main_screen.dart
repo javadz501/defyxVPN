@@ -4,7 +4,6 @@ import 'package:defyx_vpn/modules/main/presentation/widgets/secret_tap_handler.d
 import 'package:defyx_vpn/modules/main/presentation/widgets/privacy_notice_dialog.dart';
 import 'package:defyx_vpn/modules/main/application/main_screen_provider.dart';
 import 'package:defyx_vpn/modules/main/presentation/widgets/connection_button.dart';
-import 'package:defyx_vpn/modules/main/presentation/widgets/google_ads.dart';
 import 'package:defyx_vpn/modules/main/presentation/widgets/dino.dart';
 import 'package:defyx_vpn/modules/main/presentation/widgets/main_screen_background.dart';
 import 'package:defyx_vpn/modules/main/presentation/widgets/header_section.dart';
@@ -26,9 +25,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   final ScrollController _scrollController = ScrollController();
   bool _showHeaderShadow = false;
   ConnectionStatus? _previousConnectionStatus;
-  bool? _previousShowCountdown;
   late MainScreenLogic _logic;
-  late final GoogleAds _googleAds;
   late ScrollManager _scrollManager;
   late SecretTapHandler _secretTapHandler;
 
@@ -40,11 +37,6 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     _logic = MainScreenLogic(ref);
     _scrollManager = ScrollManager(_scrollController);
     _secretTapHandler = SecretTapHandler();
-
-    _googleAds = GoogleAds(
-      backgroundColor: const Color(0xFF19312F),
-      cornerRadius: 10.0.r,
-    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _logic.checkAndReconnect();
@@ -96,10 +88,6 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     });
   }
 
-  void _handleAdsStateChange(bool showCountdown) {
-    _scrollManager.handleAdsStateChange(showCountdown);
-  }
-
   void _checkInitialConnectionState() {
     Future.delayed(const Duration(milliseconds: 1000), () {
       if (!mounted) return;
@@ -136,25 +124,6 @@ class _MainScreenState extends ConsumerState<MainScreen> {
   @override
   Widget build(BuildContext context) {
     final connectionState = ref.watch(connectionStateProvider);
-    final adsState = ref.watch(googleAdsProvider);
-
-    // CRITICAL FIX: Only handle state changes when actually different
-    // This prevents infinite rebuild loops that crash Samsung devices
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _previousConnectionStatus != connectionState.status) {
-        _previousConnectionStatus = connectionState.status;
-        _handleConnectionStateChange(connectionState.status);
-      }
-
-      if (mounted &&
-          _previousShowCountdown != null &&
-          _previousShowCountdown != adsState.showCountdown &&
-          _previousShowCountdown! &&
-          !adsState.showCountdown) {
-        _handleAdsStateChange(adsState.showCountdown);
-      }
-      _previousShowCountdown = adsState.showCountdown;
-    });
 
     return MainScreenBackground(
       connectionStatus: connectionState.status,
@@ -205,8 +174,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                                   ? 0.24.sh
                                   : 0.28.sh,
                             ),
-                            _buildContentSection(
-                                connectionState.status, adsState),
+                            _buildContentSection(connectionState.status),
                             SizedBox(height: 0.15.sh),
                           ],
                         ),
@@ -247,7 +215,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
     );
   }
 
-  Widget _buildContentSection(ConnectionStatus status, dynamic adsState) {
+  Widget _buildContentSection(ConnectionStatus status) {
     switch (status) {
       case ConnectionStatus.noInternet:
         _dinoGame ??= DinoGame();
@@ -260,38 +228,10 @@ class _MainScreenState extends ConsumerState<MainScreen> {
         );
 
       case ConnectionStatus.disconnected:
-        return TipsSliderSection(
-          status: status,
-        );
+        return TipsSliderSection(status: status);
 
       default:
-        final shouldShowAd =
-            status == ConnectionStatus.connected && adsState.showCountdown;
-
-        return SizedBox(
-          height: 280.h,
-          width: 336.w,
-          child: AnimatedSlide(
-            offset: Offset(
-              0,
-              shouldShowAd ? 0.0 : 1.0,
-            ),
-            duration: const Duration(milliseconds: 800),
-            curve: Curves.easeOut,
-            child: AnimatedOpacity(
-              opacity: shouldShowAd ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 500),
-              curve: Curves.easeInOut,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: const Color(0xFF19312F),
-                  borderRadius: BorderRadius.circular(10.r),
-                ),
-                child: _googleAds,
-              ),
-            ),
-          ),
-        );
+        return const SizedBox.shrink();
     }
   }
 }
